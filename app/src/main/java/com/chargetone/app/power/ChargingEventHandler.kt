@@ -22,6 +22,11 @@ object ChargingEventHandler {
                 "（${plugLabel(transition.plugged, transition.connected)}）"
         )
 
+        if (!transition.connected) {
+            // 拔出即结束本次充电周期，下一次充满时可以再响
+            FullChargeDetector.reset()
+        }
+
         val settings = AppGraph.settings.currentBlocking()
 
         if (transition.connected && !settings.chargeEnabled) {
@@ -34,11 +39,34 @@ object ChargingEventHandler {
         }
 
         val token = if (transition.connected) settings.chargeTone else settings.unplugTone
-        if (token.isNullOrBlank()) {
-            EventLog.add("尚未设置${if (transition.connected) "充电" else "断开"}提示音，跳过")
+        play(
+            context = context,
+            token = token,
+            volumePercent = settings.toneVolumePercent,
+            label = if (transition.connected) "充电" else "断开",
+        )
+    }
+
+    fun handleFullCharge(context: Context, percent: Int) {
+        val settings = AppGraph.settings.currentBlocking()
+        if (!settings.fullEnabled) {
+            EventLog.add("充满提示音已关闭，跳过")
             return
         }
+        EventLog.add("检测到电量已满（${percent}%），播放充满提示音")
+        play(
+            context = context,
+            token = settings.fullTone,
+            volumePercent = settings.toneVolumePercent,
+            label = "充满",
+        )
+    }
 
+    private fun play(context: Context, token: String?, volumePercent: Int, label: String) {
+        if (token.isNullOrBlank()) {
+            EventLog.add("尚未设置${label}提示音，跳过")
+            return
+        }
         val file = AppGraph.toneStore.resolve(token)
         if (file == null) {
             EventLog.add("提示音文件不存在：$token")
@@ -51,7 +79,7 @@ object ChargingEventHandler {
             return
         }
 
-        AppGraph.player.play(file, settings.toneVolumePercent)
+        AppGraph.player.play(file, volumePercent)
     }
 
     /** 读取粘性电池广播中的 EXTRA_PLUGGED：0 无、1 AC、2 USB、4 无线 */

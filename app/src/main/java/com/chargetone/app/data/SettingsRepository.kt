@@ -52,8 +52,10 @@ class SettingsRepository(context: Context) {
         appContext.settingsDataStore.edit { prefs ->
             prefs[KEY_CHARGE_ENABLED] = next.chargeEnabled
             prefs[KEY_UNPLUG_ENABLED] = next.unplugEnabled
+            prefs[KEY_FULL_ENABLED] = next.fullEnabled
             prefs[KEY_CHARGE_TONE] = next.chargeTone.orEmpty()
             prefs[KEY_UNPLUG_TONE] = next.unplugTone.orEmpty()
+            prefs[KEY_FULL_TONE] = next.fullTone.orEmpty()
             prefs[KEY_VOLUME_PERCENT] = next.toneVolumePercent.coerceIn(0, 100)
             prefs[KEY_MONITOR_ENABLED] = next.monitorEnabled
         }
@@ -62,8 +64,10 @@ class SettingsRepository(context: Context) {
     private fun Preferences.toSettings(): Settings = Settings(
         chargeEnabled = this[KEY_CHARGE_ENABLED] ?: true,
         unplugEnabled = this[KEY_UNPLUG_ENABLED] ?: true,
+        fullEnabled = this[KEY_FULL_ENABLED] ?: true,
         chargeTone = this[KEY_CHARGE_TONE]?.takeIf { it.isNotBlank() },
         unplugTone = this[KEY_UNPLUG_TONE]?.takeIf { it.isNotBlank() },
+        fullTone = this[KEY_FULL_TONE]?.takeIf { it.isNotBlank() },
         toneVolumePercent = (this[KEY_VOLUME_PERCENT] ?: 100).coerceIn(0, 100),
         monitorEnabled = this[KEY_MONITOR_ENABLED] ?: false,
     )
@@ -73,8 +77,10 @@ class SettingsRepository(context: Context) {
 
         val KEY_CHARGE_ENABLED = booleanPreferencesKey("charge_enabled")
         val KEY_UNPLUG_ENABLED = booleanPreferencesKey("unplug_enabled")
+        val KEY_FULL_ENABLED = booleanPreferencesKey("full_enabled")
         val KEY_CHARGE_TONE = stringPreferencesKey("charge_tone")
         val KEY_UNPLUG_TONE = stringPreferencesKey("unplug_tone")
+        val KEY_FULL_TONE = stringPreferencesKey("full_tone")
         val KEY_VOLUME_PERCENT = intPreferencesKey("volume_percent")
         val KEY_MONITOR_ENABLED = booleanPreferencesKey("monitor_enabled")
     }

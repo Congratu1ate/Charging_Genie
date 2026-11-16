@@ -21,7 +21,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -55,10 +54,35 @@ import com.chargetone.app.service.ChargingService
 import com.chargetone.app.service.MonitorStatus
 import kotlinx.coroutines.launch
 
-/** 两个可独立配置的提示音槽位 */
+/** 三个可独立配置的提示音槽位 */
 private enum class ToneSlot(val title: String) {
     CHARGE("充电时"),
     UNPLUG("断开充电时"),
+    FULL("充满电时"),
+}
+
+private fun Settings.toneFor(slot: ToneSlot): String? = when (slot) {
+    ToneSlot.CHARGE -> chargeTone
+    ToneSlot.UNPLUG -> unplugTone
+    ToneSlot.FULL -> fullTone
+}
+
+private fun Settings.enabledFor(slot: ToneSlot): Boolean = when (slot) {
+    ToneSlot.CHARGE -> chargeEnabled
+    ToneSlot.UNPLUG -> unplugEnabled
+    ToneSlot.FULL -> fullEnabled
+}
+
+private fun Settings.withTone(slot: ToneSlot, token: String?): Settings = when (slot) {
+    ToneSlot.CHARGE -> copy(chargeTone = token)
+    ToneSlot.UNPLUG -> copy(unplugTone = token)
+    ToneSlot.FULL -> copy(fullTone = token)
+}
+
+private fun Settings.withEnabled(slot: ToneSlot, value: Boolean): Settings = when (slot) {
+    ToneSlot.CHARGE -> copy(chargeEnabled = value)
+    ToneSlot.UNPLUG -> copy(unplugEnabled = value)
+    ToneSlot.FULL -> copy(fullEnabled = value)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -115,7 +139,7 @@ fun MainScreen() {
         pendingSlot = null
         if (uri == null || slot == null) return@rememberLauncherForActivityResult
 
-        val previousToken = if (slot == ToneSlot.CHARGE) settings.chargeTone else settings.unplugTone
+        val previousToken = settings.toneFor(slot)
 
         scope.launch {
             val token = AppGraph.toneStore.import(uri)
@@ -123,9 +147,7 @@ fun MainScreen() {
                 snackbarHostState.showSnackbar("无法读取该音频文件，请换一个试试")
                 return@launch
             }
-            AppGraph.settings.update {
-                if (slot == ToneSlot.CHARGE) it.copy(chargeTone = token) else it.copy(unplugTone = token)
-            }
+            AppGraph.settings.update { it.withTone(slot, token) }
             AppGraph.toneStore.delete(previousToken)
             snackbarHostState.showSnackbar("已设为${slot.title}提示音")
         }
@@ -146,11 +168,9 @@ fun MainScreen() {
     }
 
     fun clear(slot: ToneSlot) {
-        val token = if (slot == ToneSlot.CHARGE) settings.chargeTone else settings.unplugTone
+        val token = settings.toneFor(slot)
         scope.launch {
-            AppGraph.settings.update {
-                if (slot == ToneSlot.CHARGE) it.copy(chargeTone = null) else it.copy(unplugTone = null)
-            }
+            AppGraph.settings.update { it.withTone(slot, null) }
             AppGraph.toneStore.delete(token)
             snackbarHostState.showSnackbar("已清除${slot.title}提示音")
         }
@@ -175,29 +195,19 @@ fun MainScreen() {
                 onShowGuide = { guideVisible = true },
             )
 
-            ToneSection(
-                slot = ToneSlot.CHARGE,
-                enabled = settings.chargeEnabled,
-                toneName = AppGraph.toneStore.displayName(settings.chargeTone),
-                onToggle = { value ->
-                    scope.launch { AppGraph.settings.update { it.copy(chargeEnabled = value) } }
-                },
-                onPick = { pick(ToneSlot.CHARGE) },
-                onPreview = { preview(settings.chargeTone) },
-                onClear = { clear(ToneSlot.CHARGE) },
-            )
-
-            ToneSection(
-                slot = ToneSlot.UNPLUG,
-                enabled = settings.unplugEnabled,
-                toneName = AppGraph.toneStore.displayName(settings.unplugTone),
-                onToggle = { value ->
-                    scope.launch { AppGraph.settings.update { it.copy(unplugEnabled = value) } }
-                },
-                onPick = { pick(ToneSlot.UNPLUG) },
-                onPreview = { preview(settings.unplugTone) },
-                onClear = { clear(ToneSlot.UNPLUG) },
-            )
+            ToneSlot.entries.forEach { slot ->
+                ToneSection(
+                    slot = slot,
+                    enabled = settings.enabledFor(slot),
+                    toneName = AppGraph.toneStore.displayName(settings.toneFor(slot)),
+                    onToggle = { value ->
+                        scope.launch { AppGraph.settings.update { it.withEnabled(slot, value) } }
+                    },
+                    onPick = { pick(slot) },
+                    onPreview = { preview(settings.toneFor(slot)) },
+                    onClear = { clear(slot) },
+                )
+            }
 
             VolumeSection(
                 percent = settings.toneVolumePercent,
@@ -236,10 +246,7 @@ private fun ServiceSection(
         else -> "已关闭"
     }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(),
-    ) {
+    Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -297,6 +304,13 @@ private fun ToneSection(
                     modifier = Modifier.weight(1f),
                 ) { Text("试听") }
                 OutlinedButton(onClick = onClear, enabled = toneName != null) { Text("清除") }
+            }
+
+            if (slot == ToneSlot.FULL) {
+                Text(
+                    text = "每次充电到 100% 时响一次；拔掉充电器后重新开始计算。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }
@@ -392,7 +406,7 @@ private fun GuideDialog(onDismiss: () -> Unit, onOpenAppSettings: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "1. 本应用只负责「在插拔充电器时播放你选定的音频」，不会修改 ColorOS 自带的充电音效。",
+                    "1. 本应用只负责「在插拔充电器、充满电时播放你选定的音频」，不会修改 ColorOS 自带的充电音效。",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
@@ -405,12 +419,17 @@ private fun GuideDialog(onDismiss: () -> Unit, onOpenAppSettings: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
-                    "4. 为保证服务不被清理，请在「设置 → 应用 → 充电精灵 → 电池」中选择「不限制」，" +
+                    "4. 充满电提示音依赖系统上报的电量状态：若开启了「充电保护 / 限充 80%」，电量不会到 100%，" +
+                        "该提示音也不会响。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    "5. 为保证服务不被清理，请在「设置 → 应用 → 充电精灵 → 电池」中选择「不限制」，" +
                         "并在手机管家中允许自启动与后台运行。",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
-                    "5. 重启后应用会尝试自动恢复服务；若系统拦截，打开一次应用即可恢复。",
+                    "6. 重启后应用会尝试自动恢复服务；若系统拦截，打开一次应用即可恢复。",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
