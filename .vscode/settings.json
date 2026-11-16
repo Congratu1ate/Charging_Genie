@@ -1,0 +1,5 @@
+{
+    // 本工作区的文件均为 UTF-8；覆盖用户设置中的 files.encoding: gbk
+    "files.encoding": "utf8",
+    "files.autoGuessEncoding": false
+}
