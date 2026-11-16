@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioManager
 import android.os.BatteryManager
+import android.os.SystemClock
 import com.chargetone.app.AppGraph
 import com.chargetone.app.data.EventLog
 
@@ -13,9 +14,19 @@ import com.chargetone.app.data.EventLog
  */
 object ChargingEventHandler {
 
+    /** 插入电源后的宽限期：这段时间内的「满电」视为「插入时本来就满」 */
+    private const val PLUG_GRACE_MS = 3_000L
+
+    /** 最近一次「接入充电器」的时间，用于上面那条宽限判定 */
+    private var lastConnectAt = 0L
+
     fun handle(context: Context, connected: Boolean) {
-        val plugged = readPlugged(context)
-        val transition = ChargingStateMachine.onEvent(connected, plugged) ?: return
+        val battery = readBattery(context)
+        val transition = ChargingStateMachine.onEvent(connected, battery.plugged) ?: return
+
+        if (transition.connected) {
+            lastConnectAt = SystemClock.elapsedRealtime()
+        }
 
         EventLog.add(
             "${if (transition.connected) "检测到接入充电器" else "检测到拔出充电器"}" +
@@ -25,6 +36,9 @@ object ChargingEventHandler {
         if (!transition.connected) {
             // 拔出即结束本次充电周期，下一次充满时可以再响
             FullChargeDetector.reset()
+        } else if (FullChargeDetector.isFull(battery.levelPercent, battery.status)) {
+            // 插入时设备已满电：本周期不再单独播「充满」音，避免和充电音互相打断
+            FullChargeDetector.prime(battery.levelPercent, battery.status, transition.plugged)
         }
 
         val settings = AppGraph.settings.currentBlocking()
@@ -48,6 +62,15 @@ object ChargingEventHandler {
     }
 
     fun handleFullCharge(context: Context, percent: Int) {
+        // 刚插入电源就满电：属于「插上时本来就满」，不是「充电完成」，
+        // 且此时充电音往往正在播放，再播充满音会互相打断。
+        // 用时间宽限判定，不依赖插拔瞬间并不可靠的粘性电量状态。
+        if (SystemClock.elapsedRealtime() - lastConnectAt < PLUG_GRACE_MS) {
+            FullChargeDetector.markNotified()
+            EventLog.add("插入时已满电，跳过充满提示音")
+            return
+        }
+
         val settings = AppGraph.settings.currentBlocking()
         if (!settings.fullEnabled) {
             EventLog.add("充满提示音已关闭，跳过")
@@ -82,11 +105,23 @@ object ChargingEventHandler {
         AppGraph.player.play(file, volumePercent)
     }
 
-    /** 读取粘性电池广播中的 EXTRA_PLUGGED：0 无、1 AC、2 USB、4 无线 */
-    private fun readPlugged(context: Context): Int {
+    /** 粘性电池广播中的插拔状态、电量与充电状态 */
+    private data class BatterySnapshot(
+        val plugged: Int,
+        val levelPercent: Int,
+        val status: Int,
+    )
+
+    private fun readBattery(context: Context): BatterySnapshot {
         val sticky = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            ?: return 0
-        return sticky.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
+            ?: return BatterySnapshot(plugged = 0, levelPercent = -1, status = -1)
+        val level = sticky.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = sticky.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
+        return BatterySnapshot(
+            plugged = sticky.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0),
+            levelPercent = if (level >= 0 && scale > 0) level * 100 / scale else -1,
+            status = sticky.getIntExtra(BatteryManager.EXTRA_STATUS, -1),
+        )
     }
 
     private fun plugLabel(plugged: Int, connected: Boolean): String = when {

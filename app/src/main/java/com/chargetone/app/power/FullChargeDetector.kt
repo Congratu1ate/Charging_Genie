@@ -12,15 +12,21 @@ import android.os.BatteryManager
  * - 已接入电源且电量达到 100%（或系统状态为 FULL）→ 通知一次；
  * - 拔出电源 → 重置，下一次充电到满电时可以再通知；
  * - 服务启动时用当前电量做一次 priming，避免刚打开应用就突然播放。
+ *
+ * 另外，「插入时设备已经满电」不算充满事件（否则会和充电音同时触发、
+ * 互相打断），这种情况通过 [prime] 把它标记为本周期的已通知状态。
  */
 object FullChargeDetector {
 
     private var notifiedThisSession = false
 
+    /** 判断给定电量/状态是否属于满电 */
+    fun isFull(levelPercent: Int, status: Int): Boolean =
+        status == BatteryManager.BATTERY_STATUS_FULL || levelPercent >= 100
+
     /** 服务/监听器启动时调用：按当前状态初始化，不触发播放 */
     fun prime(levelPercent: Int, status: Int, plugged: Int) {
-        val full = isFull(levelPercent, status)
-        notifiedThisSession = plugged != 0 && full
+        notifiedThisSession = plugged != 0 && isFull(levelPercent, status)
     }
 
     /**
@@ -31,7 +37,11 @@ object FullChargeDetector {
             notifiedThisSession = false
             return false
         }
-        if (!isFull(levelPercent, status)) return false
+        if (!isFull(levelPercent, status)) {
+            // 仍在充电但已不满（例如插入时满电、随后因负载掉到 99%），重新武装
+            notifiedThisSession = false
+            return false
+        }
         if (notifiedThisSession) return false
         notifiedThisSession = true
         return true
@@ -42,6 +52,8 @@ object FullChargeDetector {
         notifiedThisSession = false
     }
 
-    private fun isFull(levelPercent: Int, status: Int): Boolean =
-        status == BatteryManager.BATTERY_STATUS_FULL || levelPercent >= 100
+    /** 外部已判定本次「充满」不需要播报时，标记为本周期已通知 */
+    fun markNotified() {
+        notifiedThisSession = true
+    }
 }

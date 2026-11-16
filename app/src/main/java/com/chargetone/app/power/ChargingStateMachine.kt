@@ -45,6 +45,9 @@ object ChargingStateMachine {
         return Transition(connected = connected, plugged = plugged)
     }
 
+    /** 当前已知的充电状态；null 表示进程刚启动、尚未收到过事件 */
+    fun isCurrentlyConnected(): Boolean? = lastConnected
+
     /** 仅用于测试：重置内部状态 */
     fun reset() {
         lastConnected = null

@@ -61,4 +61,22 @@ class FullChargeDetectorTest {
 
         assertTrue(FullChargeDetector.shouldNotify(100, charging, ac))
     }
+
+    @Test
+    fun `插入时已满电会被标记为本周期已通知`() {
+        // 模拟「插上电源那一刻就 100%」：整周期内的后续 BATTERY_CHANGED 不应再触发
+        FullChargeDetector.prime(levelPercent = 100, status = charging, plugged = ac)
+
+        assertFalse(FullChargeDetector.shouldNotify(100, charging, ac))
+    }
+
+    @Test
+    fun `插入时已满但中途掉电，再次充满会通知`() {
+        FullChargeDetector.prime(levelPercent = 100, status = charging, plugged = ac)
+        assertFalse(FullChargeDetector.shouldNotify(100, charging, ac))
+
+        // 仍在充电但电量掉到 99%，应重新武装
+        assertFalse(FullChargeDetector.shouldNotify(99, charging, ac))
+        assertTrue(FullChargeDetector.shouldNotify(100, charging, ac))
+    }
 }

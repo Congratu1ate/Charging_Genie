@@ -49,7 +49,11 @@ class ChargingMonitor(private val context: Context) {
                         val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
                         val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
                         val percent = percentOf(intent)
-                        if (FullChargeDetector.shouldNotify(percent, status, plugged)) {
+                        if (ChargingStateMachine.isCurrentlyConnected() != true) {
+                            // 插拔事件还没处理完（BATTERY_CHANGED 可能先于 POWER_CONNECTED 到达）。
+                            // 此刻若已满电，说明是「插入时本来就满」，交给充电音即可，不补播充满音。
+                            FullChargeDetector.prime(percent, status, plugged)
+                        } else if (FullChargeDetector.shouldNotify(percent, status, plugged)) {
                             ChargingEventHandler.handleFullCharge(receiverContext, percent)
                         }
                     }
