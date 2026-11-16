@@ -7,7 +7,7 @@
 ## 功能特性
 
 - **插拔检测**：接入充电器、拔出充电器分别触发，可区分有线 AC / USB / 无线充电
-- **充满提醒**：充电到 100% 时再响一次（每个充电周期仅一次，拔出后重新计算）
+- **充满提醒**：充电到 100% 时再响一次（每个充电周期仅一次，拔出后重新计算）⏳ *待真机验证*
 - **三音效槽位**：充电音、断开音、充满音各自独立设置、独立开关
 - **任意音频**：通过系统文件选择器（SAF）选择本地音频，自动复制到应用私有目录，原文件删除或移动不影响使用
 - **试听与音量**：随时试听，音量滑块在系统通知音量基础上再做衰减
@@ -21,6 +21,18 @@
 |---|---|---|
 | ![主界面](docs/screenshots/main.png) | ![充满电](docs/screenshots/full_charge.png) | ![通知](docs/screenshots/notification.png) |
 
+## 验证状态
+
+| 功能 | 状态 |
+|---|---|
+| 充电 / 断开提示音 | ✅ 已在一加 Ace 2 Pro（PJA110）/ ColorOS 16 / Android 16 真机验证 |
+| 前台服务常驻、开机恢复、通知开关 | ✅ 真机 + 模拟器验证 |
+| 去重防抖、权限、覆盖安装保留设置 | ✅ 真机验证 |
+| **充满电提示音** | ⏳ **待真机验证**：目前仅在 Android 11 模拟器上通过（触发、同周期去重、周期重置、重启不补播）。<br>真机暂未覆盖「从低于 100% 充到满」的路径，因为测试机长期处在 100% 电量 |
+
+> 充满功能的真机验证方法：把手机用到 90% 以下再充电到 100%，确认响**一次**；
+> 之后拔掉再插回（此时已满电）应**只**响充电音，不叠加充满音。
+
 ## 为什么必须有常驻通知
 
 `ACTION_POWER_CONNECTED` / `ACTION_POWER_DISCONNECTED` 自 Android 8.0 起属于**受限制的隐式广播**，不在官方豁免清单内（见[隐式广播例外情况](https://developer.android.com/guide/components/broadcast-exceptions)）。标注接收器会被系统直接丢弃，因此只能由存活进程中的**动态注册接收器**监听，而让进程存活只能依赖前台服务——代价就是那条「正在监听」的通知。
@@ -29,7 +41,7 @@
 
 ## 安装
 
-从 [Releases](https://github.com/Congratu1ate/Charging_Genie/releases) 下载 `ChargeTone-v0.2.0-debug.apk` 安装。
+从 [Releases](https://github.com/Congratu1ate/Charging_Genie/releases) 下载 `ChargeTone-v0.2.1-debug.apk` 安装。
 
 - 最低支持 Android 8.0（API 26），当前 `targetSdk 34`
 - 首批验证机型：一加 Ace 2 Pro（PJA110）/ ColorOS 16 / Android 16
