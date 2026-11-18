@@ -14,6 +14,8 @@
 - **去重防抖**：同一状态变化只响一次，1.2 秒内的抖动丢弃
 - **开机自恢复**：重启后自动恢复监听；被系统回收后按 `START_STICKY` 重建服务
 - **静音策略**：走系统通知音量通道，静音 / 勿扰模式下自动不发声
+- **可选极限保活**：无障碍宿主 + 1×1 全透明悬浮窗 + 快捷磁贴 + JobScheduler 兜底，
+  应对 ColorOS o-kill 定期清理后台进程（详见 [保活方案](docs/保活方案.md)）
 
 ## 截图
 
@@ -41,7 +43,7 @@
 
 ## 安装
 
-从 [Releases](https://github.com/Congratu1ate/Charging_Genie/releases) 下载 `ChargeTone-v0.2.1-debug.apk` 安装。
+从 [Releases](https://github.com/Congratu1ate/Charging_Genie/releases) 下载 `ChargeTone-v0.2.2-debug.apk` 安装。
 
 - 最低支持 Android 8.0（API 26），当前 `targetSdk 34`
 - 首批验证机型：一加 Ace 2 Pro（PJA110）/ ColorOS 16 / Android 16

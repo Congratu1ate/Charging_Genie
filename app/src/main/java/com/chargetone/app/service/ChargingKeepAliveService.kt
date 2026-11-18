@@ -61,7 +61,8 @@ object AccessibilityKeepAlive {
     /** 跳到本应用的无障碍设置详情页，失败则退回到无障碍总列表 */
     fun openSettings(context: Context) {
         val component = android.content.ComponentName(context, ChargingKeepAliveService::class.java)
-        val details = Intent(Settings.ACTION_ACCESSIBILITY_DETAILS_SETTINGS).apply {
+        // 该 action 没有公开常量，直接用字符串；部分 ROM 不支持时回退到总列表
+        val details = Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS").apply {
             putExtra(Intent.EXTRA_COMPONENT_NAME, component)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
