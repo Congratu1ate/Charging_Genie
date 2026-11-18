@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 1x1 全透明悬浮窗保活（可选，需用户在系统设置中授权） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:name=".ChargeToneApp"
@@ -37,6 +39,40 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="charging_state_monitor" />
+        </service>
+
+        <service
+            android:name=".service.ChargingWatchJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!--
+            可选「极限保活」：一个不做任何辅助动作的无障碍服务。
+            仅在用户主动开启后生效，用于规避 ColorOS o-kill 对前台服务进程的定期回收。
+        -->
+        <service
+            android:name=".service.ChargingKeepAliveService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- 通知栏快捷磁贴：一键查看/切换监听状态 -->
+        <service
+            android:name=".service.ChargingTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_charge"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
         </service>
 
         <receiver

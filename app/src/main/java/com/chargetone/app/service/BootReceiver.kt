@@ -21,5 +21,8 @@ class BootReceiver : BroadcastReceiver() {
         runCatching { ChargingService.start(context) }
             .onSuccess { EventLog.add("开机自动恢复监听") }
             .onFailure { EventLog.add("开机恢复监听失败：${it.javaClass.simpleName}，请打开应用恢复") }
+
+        // 兜底任务本身就带 persisted，重启后依然有效；这里再补一次以防系统清理
+        ChargingJobScheduler.scheduleAll(context)
     }
 }

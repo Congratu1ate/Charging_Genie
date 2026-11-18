@@ -61,6 +61,10 @@ class ChargingService : Service() {
         val alreadyRunning = MonitorStatus.running.value
         monitor.start()
         MonitorStatus.setRunning(true)
+        // 有权限时挂一个 1x1 透明悬浮窗，显著降低被国产 ROM 清理的概率
+        KeepAliveOverlay.acquire(this)
+        // 每次服务起来都把兜底任务补齐（系统重启、被 o-kill 后自愈时都会重新排期）
+        ChargingJobScheduler.scheduleAll(this)
         if (!alreadyRunning) {
             EventLog.add("后台监听服务已启动")
         }
@@ -69,6 +73,7 @@ class ChargingService : Service() {
 
     override fun onDestroy() {
         monitor.stop()
+        KeepAliveOverlay.release()
         MonitorStatus.setRunning(false)
         EventLog.add("后台监听服务已停止")
         scope.cancel()
@@ -83,12 +88,18 @@ class ChargingService : Service() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             "后台监听",
-            NotificationManager.IMPORTANCE_MIN,
+            // LOW 而不是 MIN：MIN 级通知在许多国产 ROM 里等同于「没有通知」，
+            // 前台服务的可见性下降后更容易被 o-kill 清理
+            NotificationManager.IMPORTANCE_LOW,
         ).apply {
             description = "保持监听插拔充电器事件的常驻通知"
             setShowBadge(false)
+            setSound(null, null)
+            enableVibration(false)
         }
         manager.createNotificationChannel(channel)
+        // 旧的低优先级渠道（重要性已无法修改，只能弃用）
+        manager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
     }
 
     private fun buildNotification(): android.app.Notification {
@@ -121,7 +132,8 @@ class ChargingService : Service() {
     companion object {
         const val ACTION_STOP = "com.chargetone.app.action.STOP_MONITOR"
 
-        private const val CHANNEL_ID = "charging_monitor"
+        private const val CHANNEL_ID = "charging_monitor_v2"
+        private const val LEGACY_CHANNEL_ID = "charging_monitor"
         private const val NOTIFICATION_ID = 1001
         private const val REQUEST_CONTENT = 1
         private const val REQUEST_STOP = 2

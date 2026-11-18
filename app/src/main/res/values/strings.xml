@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">充电精灵</string>
+    <string name="accessibility_service_description">仅用于后台保活：不读取屏幕内容、不执行任何辅助操作。开启后系统不会轻易清理本应用的后台进程，从而保证插拔充电器时及时播放提示音。</string>
 </resources>

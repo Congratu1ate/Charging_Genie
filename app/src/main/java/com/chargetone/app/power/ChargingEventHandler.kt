@@ -8,6 +8,7 @@ import android.os.BatteryManager
 import android.os.SystemClock
 import com.chargetone.app.AppGraph
 import com.chargetone.app.data.EventLog
+import com.chargetone.app.service.ChargingJobScheduler
 
 /**
  * 充电事件处理的核心逻辑，由 [ChargingMonitor] 的动态接收器调用。
@@ -36,6 +37,8 @@ object ChargingEventHandler {
         if (!transition.connected) {
             // 拔出即结束本次充电周期，下一次充满时可以再响
             FullChargeDetector.reset()
+            // 现在没在充电，可以安全地武装「插上就触发」的兜底任务
+            ChargingJobScheduler.scheduleWakeOnCharge(context)
         } else if (FullChargeDetector.isFull(battery.levelPercent, battery.status)) {
             // 插入时设备已满电：本周期不再单独播「充满」音，避免和充电音互相打断
             FullChargeDetector.prime(battery.levelPercent, battery.status, transition.plugged)

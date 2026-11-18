@@ -33,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -46,11 +47,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chargetone.app.AppGraph
 import com.chargetone.app.data.EventLog
 import com.chargetone.app.data.Settings
+import com.chargetone.app.service.AccessibilityKeepAlive
 import com.chargetone.app.service.ChargingService
+import com.chargetone.app.service.KeepAliveOverlay
 import com.chargetone.app.service.MonitorStatus
 import kotlinx.coroutines.launch
 
@@ -98,6 +104,21 @@ fun MainScreen() {
 
     var pendingSlot by remember { mutableStateOf<ToneSlot?>(null) }
     var guideVisible by remember { mutableStateOf(false) }
+
+    // 无障碍保活状态直接问系统，每次回到前台刷新
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var accessibilityEnabled by remember { mutableStateOf(false) }
+    var overlayReady by remember { mutableStateOf(false) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                accessibilityEnabled = AccessibilityKeepAlive.isEnabled(context)
+                overlayReady = KeepAliveOverlay.canDrawOverlays(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     fun startMonitor() {
         runCatching { ChargingService.start(context) }
@@ -195,6 +216,13 @@ fun MainScreen() {
                 onShowGuide = { guideVisible = true },
             )
 
+            KeepAliveSection(
+                enabled = accessibilityEnabled,
+                overlayReady = overlayReady,
+                onOpenSettings = { AccessibilityKeepAlive.openSettings(context) },
+                onRequestOverlay = { AccessibilityKeepAlive.openOverlaySettings(context) },
+            )
+
             ToneSlot.entries.forEach { slot ->
                 ToneSection(
                     slot = slot,
@@ -264,6 +292,57 @@ private fun ServiceSection(
                 style = MaterialTheme.typography.bodySmall,
             )
             TextButton(onClick = onShowGuide) { Text("查看保活设置指引") }
+        }
+    }
+}
+
+@Composable
+private fun KeepAliveSection(
+    enabled: Boolean,
+    overlayReady: Boolean,
+    onOpenSettings: () -> Unit,
+    onRequestOverlay: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("极限保活（可选）", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "ColorOS 的 o-kill 会定期清理前台服务进程（实测一天 8 次以上），" +
+                    "进程被杀后要等系统冷启动才能响应，就会出现「过一会儿才响」或「不响」。\n\n" +
+                    "两层保活都不读取任何内容：无障碍服务不读取屏幕、不处理事件；" +
+                    "悬浮窗是 1×1 全透明、不可触摸的窗口。",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Text(
+                text = if (enabled) "无障碍保活：已开启" else "无障碍保活：未开启",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (!enabled) {
+                Text(
+                    text = "开关为灰色时：先到「应用信息」右上角菜单允许「受限制的设置」（侧载应用限制）。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            OutlinedButton(onClick = onOpenSettings) {
+                Text(if (enabled) "查看无障碍设置" else "去开启无障碍保活")
+            }
+
+            Text(
+                text = if (overlayReady) "悬浮窗保活：已授权（服务运行时会自动挂上）" else "悬浮窗保活：未授权",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedButton(onClick = onRequestOverlay) {
+                Text(if (overlayReady) "查看悬浮窗权限" else "去授权悬浮窗保活")
+            }
+
+            Text(
+                text = "还可以把「充电精灵」磁贴加到通知栏快捷开关，服务被清理后一键拉起。",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }
