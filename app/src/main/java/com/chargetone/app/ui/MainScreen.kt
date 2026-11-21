@@ -7,8 +7,10 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings as AndroidSettings
+import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -54,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chargetone.app.AppGraph
 import com.chargetone.app.data.EventLog
 import com.chargetone.app.data.Settings
+import com.chargetone.app.data.ToneHistoryEntry
 import com.chargetone.app.service.AccessibilityKeepAlive
 import com.chargetone.app.service.ChargingService
 import com.chargetone.app.service.KeepAliveOverlay
@@ -91,6 +95,25 @@ private fun Settings.withEnabled(slot: ToneSlot, value: Boolean): Settings = whe
     ToneSlot.FULL -> copy(fullEnabled = value)
 }
 
+/** 存进「使用记录」里的槽位标识 */
+private val ToneSlot.key: String
+    get() = when (this) {
+        ToneSlot.CHARGE -> "charge"
+        ToneSlot.UNPLUG -> "unplug"
+        ToneSlot.FULL -> "full"
+    }
+
+/** 该文件是否仍被某个槽位引用（引用中的文件不能删） */
+private fun Settings.references(token: String): Boolean =
+    chargeTone == token || unplugTone == token || fullTone == token
+
+private fun slotTitleOf(key: String): String = when (key) {
+    "charge" -> ToneSlot.CHARGE.title
+    "unplug" -> ToneSlot.UNPLUG.title
+    "full" -> ToneSlot.FULL.title
+    else -> "未记录"
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen() {
@@ -101,6 +124,10 @@ fun MainScreen() {
     val settings by AppGraph.settings.settings.collectAsStateWithLifecycle(initialValue = Settings())
     val events by EventLog.events.collectAsStateWithLifecycle()
     val serviceRunning by MonitorStatus.running.collectAsStateWithLifecycle()
+    val history by AppGraph.toneHistory.entries.collectAsStateWithLifecycle(
+        initialValue = emptyList<ToneHistoryEntry>()
+    )
+    var historyDialogEntry by remember { mutableStateOf<ToneHistoryEntry?>(null) }
 
     var pendingSlot by remember { mutableStateOf<ToneSlot?>(null) }
     var guideVisible by remember { mutableStateOf(false) }
@@ -160,8 +187,6 @@ fun MainScreen() {
         pendingSlot = null
         if (uri == null || slot == null) return@rememberLauncherForActivityResult
 
-        val previousToken = settings.toneFor(slot)
-
         scope.launch {
             val token = AppGraph.toneStore.import(uri)
             if (token == null) {
@@ -169,7 +194,15 @@ fun MainScreen() {
                 return@launch
             }
             AppGraph.settings.update { it.withTone(slot, token) }
-            AppGraph.toneStore.delete(previousToken)
+            // 旧文件不删：可能还被「使用过的音效」引用，从历史里删除时才真正清理
+            val evicted = AppGraph.toneHistory.record(
+                token = token,
+                displayName = AppGraph.toneStore.displayName(token) ?: token,
+                slot = slot.key,
+            )
+            evicted.forEach { entry ->
+                if (!settings.references(entry.token)) AppGraph.toneStore.delete(entry.token)
+            }
             snackbarHostState.showSnackbar("已设为${slot.title}提示音")
         }
     }
@@ -189,11 +222,37 @@ fun MainScreen() {
     }
 
     fun clear(slot: ToneSlot) {
-        val token = settings.toneFor(slot)
         scope.launch {
             AppGraph.settings.update { it.withTone(slot, null) }
-            AppGraph.toneStore.delete(token)
             snackbarHostState.showSnackbar("已清除${slot.title}提示音")
+        }
+    }
+
+
+    fun applyHistory(entry: ToneHistoryEntry, slot: ToneSlot) {
+        scope.launch {
+            AppGraph.settings.update { it.withTone(slot, entry.token) }
+            AppGraph.toneHistory.record(entry.token, entry.displayName, slot.key)
+            snackbarHostState.showSnackbar("已把「${entry.displayName}」设为${slot.title}提示音")
+        }
+    }
+
+    fun deleteHistory(entry: ToneHistoryEntry) {
+        scope.launch {
+            AppGraph.toneHistory.remove(entry.token)
+            if (!settings.references(entry.token)) AppGraph.toneStore.delete(entry.token)
+            snackbarHostState.showSnackbar("已从使用记录中移除")
+        }
+    }
+
+    fun clearHistory() {
+        scope.launch {
+            val all = AppGraph.toneHistory.currentBlocking()
+            AppGraph.toneHistory.clear()
+            all.forEach { entry ->
+                if (!settings.references(entry.token)) AppGraph.toneStore.delete(entry.token)
+            }
+            snackbarHostState.showSnackbar("已清空使用记录")
         }
     }
 
@@ -237,6 +296,12 @@ fun MainScreen() {
                 )
             }
 
+            HistorySection(
+                entries = history,
+                onSelect = { historyDialogEntry = it },
+                onClearAll = { clearHistory() },
+            )
+
             VolumeSection(
                 percent = settings.toneVolumePercent,
                 onCommit = { value ->
@@ -257,6 +322,16 @@ fun MainScreen() {
                 guideVisible = false
                 openAppSettings(context)
             },
+        )
+    }
+
+    historyDialogEntry?.let { entry ->
+        HistoryDialog(
+            entry = entry,
+            onApply = { slot -> applyHistory(entry, slot) },
+            onPreview = { preview(entry.token) },
+            onDelete = { deleteHistory(entry) },
+            onDismiss = { historyDialogEntry = null },
         )
     }
 }
@@ -393,6 +468,138 @@ private fun ToneSection(
             }
         }
     }
+}
+
+@Composable
+private fun HistorySection(
+    entries: List<ToneHistoryEntry>,
+    onSelect: (ToneHistoryEntry) -> Unit,
+    onClearAll: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("使用过的音效", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = "点一下可以重新应用到任意槽位",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (entries.isNotEmpty()) {
+                    TextButton(onClick = onClearAll) { Text("清空") }
+                }
+            }
+
+            if (entries.isEmpty()) {
+                Text(
+                    text = "还没有记录。选择过的音效会出现在这里，方便随时换回来。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else {
+                entries.forEach { entry ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(entry) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = entry.displayName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = "${relativeTime(entry.usedAt)} · 曾用于${slotTitleOf(entry.slot)}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Text(
+                            text = "应用",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryDialog(
+    entry: ToneHistoryEntry,
+    onApply: (ToneSlot) -> Unit,
+    onPreview: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = entry.displayName,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "最近使用：${relativeTime(entry.usedAt)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                ToneSlot.entries.forEach { slot ->
+                    TextButton(
+                        onClick = {
+                            onApply(slot)
+                            onDismiss()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = "设为「${slot.title}」",
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Start,
+                        )
+                    }
+                }
+                TextButton(onClick = onPreview, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "试听",
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Start,
+                    )
+                }
+                TextButton(onClick = { onDelete(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "从记录中删除",
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Start,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+private fun relativeTime(timestamp: Long): String {
+    val now = System.currentTimeMillis()
+    if (now - timestamp in 0 until 60_000L) return "刚刚"
+    return DateUtils.getRelativeTimeSpanString(
+        timestamp,
+        now,
+        DateUtils.MINUTE_IN_MILLIS,
+        DateUtils.FORMAT_ABBREV_RELATIVE,
+    ).toString()
 }
 
 @Composable

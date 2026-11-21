@@ -3,6 +3,7 @@ package com.chargetone.app
 import android.content.Context
 import com.chargetone.app.audio.PlaybackEngine
 import com.chargetone.app.data.SettingsRepository
+import com.chargetone.app.data.ToneHistoryRepository
 import com.chargetone.app.data.ToneStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,12 +24,15 @@ object AppGraph {
         private set
     lateinit var player: PlaybackEngine
         private set
+    lateinit var toneHistory: ToneHistoryRepository
+        private set
 
     fun init(context: Context) {
         if (::settings.isInitialized) return
         settings = SettingsRepository(context)
         toneStore = ToneStore(context)
         player = PlaybackEngine(context)
+        toneHistory = ToneHistoryRepository(context)
 
         // 预热设置缓存，让广播接收器可以无阻塞地读取
         appScope.launch {

@@ -11,6 +11,8 @@
 - **三音效槽位**：充电音、断开音、充满音各自独立设置、独立开关
 - **任意音频**：通过系统文件选择器（SAF）选择本地音频，自动复制到应用私有目录，原文件删除或移动不影响使用
 - **试听与音量**：随时试听，音量滑块在系统通知音量基础上再做衰减
+- **使用过的音效**：选过的音效自动记录（最多 20 条，同名声效自动去重），
+  点一下即可重新应用到任意槽位，不必再去文件管理器里翻找
 - **去重防抖**：同一状态变化只响一次，1.2 秒内的抖动丢弃
 - **开机自恢复**：重启后自动恢复监听；被系统回收后按 `START_STICKY` 重建服务
 - **静音策略**：走系统通知音量通道，静音 / 勿扰模式下自动不发声
@@ -22,6 +24,10 @@
 | 主界面 | 充满电设置 | 常驻通知 |
 |---|---|---|
 | ![主界面](docs/screenshots/main.png) | ![充满电](docs/screenshots/full_charge.png) | ![通知](docs/screenshots/notification.png) |
+
+**使用过的音效**（v0.3.0 新增）：
+
+![使用过的音效](docs/screenshots/history.png)
 
 ## 验证状态
 
@@ -43,7 +49,7 @@
 
 ## 安装
 
-从 [Releases](https://github.com/Congratu1ate/Charging_Genie/releases) 下载 `ChargeTone-v0.2.2-debug.apk` 安装。
+从 [Releases](https://github.com/Congratu1ate/Charging_Genie/releases) 下载 `ChargeTone-v0.3.0-debug.apk` 安装。
 
 - 最低支持 Android 8.0（API 26），当前 `targetSdk 34`
 - 首批验证机型：一加 Ace 2 Pro（PJA110）/ ColorOS 16 / Android 16
