@@ -26,6 +26,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
@@ -58,6 +59,8 @@ import com.chargetone.app.AppGraph
 import com.chargetone.app.data.EventLog
 import com.chargetone.app.data.Settings
 import com.chargetone.app.data.ToneHistoryEntry
+import com.chargetone.app.data.TonePack
+import com.chargetone.app.data.TonePackLogic
 import com.chargetone.app.service.AccessibilityKeepAlive
 import com.chargetone.app.service.ChargingService
 import com.chargetone.app.service.KeepAliveOverlay
@@ -104,8 +107,12 @@ private val ToneSlot.key: String
     }
 
 /** 该文件是否仍被某个槽位引用（引用中的文件不能删） */
-private fun Settings.references(token: String): Boolean =
+private fun Settings.slotReferences(token: String): Boolean =
     chargeTone == token || unplugTone == token || fullTone == token
+
+/** 槽位或任意套装仍引用该文件时不能删除 */
+private fun isReferencedBy(settings: Settings, packs: List<TonePack>, token: String): Boolean =
+    settings.slotReferences(token) || packs.any { TonePackLogic.references(it, token) }
 
 private fun slotTitleOf(key: String): String = when (key) {
     "charge" -> ToneSlot.CHARGE.title
@@ -127,7 +134,12 @@ fun MainScreen() {
     val history by AppGraph.toneHistory.entries.collectAsStateWithLifecycle(
         initialValue = emptyList<ToneHistoryEntry>()
     )
+    val packs by AppGraph.tonePacks.packs.collectAsStateWithLifecycle(
+        initialValue = emptyList<TonePack>()
+    )
     var historyDialogEntry by remember { mutableStateOf<ToneHistoryEntry?>(null) }
+    var packDialogEntry by remember { mutableStateOf<TonePack?>(null) }
+    var savePackVisible by remember { mutableStateOf(false) }
 
     var pendingSlot by remember { mutableStateOf<ToneSlot?>(null) }
     var guideVisible by remember { mutableStateOf(false) }
@@ -201,7 +213,7 @@ fun MainScreen() {
                 slot = slot.key,
             )
             evicted.forEach { entry ->
-                if (!settings.references(entry.token)) AppGraph.toneStore.delete(entry.token)
+                if (!isReferencedBy(settings, packs, entry.token)) AppGraph.toneStore.delete(entry.token)
             }
             snackbarHostState.showSnackbar("已设为${slot.title}提示音")
         }
@@ -228,6 +240,52 @@ fun MainScreen() {
         }
     }
 
+    fun saveCurrentAsPack(name: String) {
+        scope.launch {
+            val evicted = AppGraph.tonePacks.save(
+                name = name,
+                chargeToken = settings.chargeTone,
+                unplugToken = settings.unplugTone,
+                fullToken = settings.fullTone,
+            )
+            evicted.forEach { pack ->
+                listOfNotNull(pack.chargeToken, pack.unplugToken, pack.fullToken)
+                    .forEach { token ->
+                        if (!isReferencedBy(settings, packs, token)) AppGraph.toneStore.delete(token)
+                    }
+            }
+            snackbarHostState.showSnackbar("套装「${name.trim()}」已保存")
+        }
+    }
+
+    fun applyPack(pack: TonePack) {
+        scope.launch {
+            fun usable(token: String?) = token != null && AppGraph.toneStore.resolve(token) != null
+            AppGraph.settings.update { current ->
+                current.copy(
+                    chargeTone = if (usable(pack.chargeToken)) pack.chargeToken else current.chargeTone,
+                    unplugTone = if (usable(pack.unplugToken)) pack.unplugToken else current.unplugTone,
+                    fullTone = if (usable(pack.fullToken)) pack.fullToken else current.fullTone,
+                )
+            }
+            AppGraph.tonePacks.touch(pack.id)
+            snackbarHostState.showSnackbar("已应用套装「${pack.name}」")
+        }
+    }
+
+    fun deletePack(pack: TonePack) {
+        scope.launch {
+            AppGraph.tonePacks.remove(pack.id)
+            val others = packs.filterNot { it.id == pack.id }
+            listOfNotNull(pack.chargeToken, pack.unplugToken, pack.fullToken)
+                .distinct()
+                .forEach { token ->
+                    if (!isReferencedBy(settings, others, token)) AppGraph.toneStore.delete(token)
+                }
+            snackbarHostState.showSnackbar("已删除套装「${pack.name}」")
+        }
+    }
+
 
     fun applyHistory(entry: ToneHistoryEntry, slot: ToneSlot) {
         scope.launch {
@@ -240,7 +298,7 @@ fun MainScreen() {
     fun deleteHistory(entry: ToneHistoryEntry) {
         scope.launch {
             AppGraph.toneHistory.remove(entry.token)
-            if (!settings.references(entry.token)) AppGraph.toneStore.delete(entry.token)
+            if (!isReferencedBy(settings, packs, entry.token)) AppGraph.toneStore.delete(entry.token)
             snackbarHostState.showSnackbar("已从使用记录中移除")
         }
     }
@@ -250,7 +308,7 @@ fun MainScreen() {
             val all = AppGraph.toneHistory.currentBlocking()
             AppGraph.toneHistory.clear()
             all.forEach { entry ->
-                if (!settings.references(entry.token)) AppGraph.toneStore.delete(entry.token)
+                if (!isReferencedBy(settings, packs, entry.token)) AppGraph.toneStore.delete(entry.token)
             }
             snackbarHostState.showSnackbar("已清空使用记录")
         }
@@ -296,9 +354,20 @@ fun MainScreen() {
                 )
             }
 
+            PackSection(
+                packs = packs,
+                canSave = settings.chargeTone != null ||
+                    settings.unplugTone != null ||
+                    settings.fullTone != null,
+                onSaveClick = { savePackVisible = true },
+                onSelect = { packDialogEntry = it },
+            )
+
             HistorySection(
                 entries = history,
-                onSelect = { historyDialogEntry = it },
+                packs = packs,
+                onSelectEntry = { historyDialogEntry = it },
+                onSelectPack = { packDialogEntry = it },
                 onClearAll = { clearHistory() },
             )
 
@@ -332,6 +401,26 @@ fun MainScreen() {
             onPreview = { preview(entry.token) },
             onDelete = { deleteHistory(entry) },
             onDismiss = { historyDialogEntry = null },
+        )
+    }
+
+    if (savePackVisible) {
+        SavePackDialog(
+            suggestedName = "套装 ${packs.size + 1}",
+            onDismiss = { savePackVisible = false },
+            onSave = { name ->
+                savePackVisible = false
+                saveCurrentAsPack(name)
+            },
+        )
+    }
+
+    packDialogEntry?.let { pack ->
+        PackDialog(
+            pack = pack,
+            onApply = { applyPack(pack) },
+            onDelete = { deletePack(pack) },
+            onDismiss = { packDialogEntry = null },
         )
     }
 }
@@ -473,7 +562,9 @@ private fun ToneSection(
 @Composable
 private fun HistorySection(
     entries: List<ToneHistoryEntry>,
-    onSelect: (ToneHistoryEntry) -> Unit,
+    packs: List<TonePack>,
+    onSelectEntry: (ToneHistoryEntry) -> Unit,
+    onSelectPack: (TonePack) -> Unit,
     onClearAll: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -485,26 +576,62 @@ private fun HistorySection(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("使用过的音效", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        text = "点一下可以重新应用到任意槽位",
+                        text = "点一下可以重新应用；套装会一次替换三个槽位",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
                 if (entries.isNotEmpty()) {
-                    TextButton(onClick = onClearAll) { Text("清空") }
+                    TextButton(onClick = onClearAll) { Text("清空记录") }
                 }
             }
 
-            if (entries.isEmpty()) {
+            if (packs.isEmpty() && entries.isEmpty()) {
                 Text(
-                    text = "还没有记录。选择过的音效会出现在这里，方便随时换回来。",
+                    text = "还没有记录。选择过的音效与保存过的套装会出现在这里。",
                     style = MaterialTheme.typography.bodySmall,
                 )
-            } else {
+            }
+
+            if (packs.isNotEmpty()) {
+                Text("套装", style = MaterialTheme.typography.labelLarge)
+                packs.forEach { pack ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelectPack(pack) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = pack.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = "${pack.toneCount()} 个音效 · ${relativeTime(pack.usedAt)}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Text(
+                            text = "应用",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
+
+            if (entries.isNotEmpty()) {
+                if (packs.isNotEmpty()) {
+                    Text("单个音效", style = MaterialTheme.typography.labelLarge)
+                }
                 entries.forEach { entry ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onSelect(entry) }
+                            .clickable { onSelectEntry(entry) }
                             .padding(vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -531,6 +658,131 @@ private fun HistorySection(
         }
     }
 }
+
+@Composable
+private fun PackSection(
+    packs: List<TonePack>,
+    canSave: Boolean,
+    onSaveClick: () -> Unit,
+    onSelect: (TonePack) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("套装", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "把充电、断开、充满三个音效打包成一套，例如「超级马里奥」。" +
+                    "应用套装会一次性替换三个槽位。",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedButton(onClick = onSaveClick, enabled = canSave) {
+                Text("把当前音效保存为套装")
+            }
+            packs.forEach { pack ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(pack) }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = pack.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "${pack.toneCount()} 个音效 · ${relativeTime(pack.usedAt)}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Text(
+                        text = "应用",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavePackDialog(
+    suggestedName: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var name by remember { mutableStateOf(suggestedName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("保存为套装") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "会把当前三个槽位的音效打包保存，之后可一键整套切换；同名套装会被覆盖。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    label = { Text("套装名称") },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(name) },
+                enabled = name.isNotBlank(),
+            ) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun PackDialog(
+    pack: TonePack,
+    onApply: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(pack.name) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "包含 ${pack.toneCount()} 个音效，最近使用：${relativeTime(pack.usedAt)}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = "应用后会一次性替换三个槽位；缺失的音效会跳过。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onApply(); onDismiss() }) { Text("应用到全部槽位") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onDelete(); onDismiss() }) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        },
+    )
+}
+
+private fun TonePack.toneCount(): Int =
+    listOfNotNull(chargeToken, unplugToken, fullToken).size
 
 @Composable
 private fun HistoryDialog(
